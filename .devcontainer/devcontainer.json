@@ -1,0 +1,4 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/java:17",
+  "forwardPorts": [8081]
+}
