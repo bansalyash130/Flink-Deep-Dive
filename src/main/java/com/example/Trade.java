@@ -16,4 +16,9 @@ public class Trade {
     }
 
     public double signedQty() { return "BUY".equals(side) ? qty : -qty; }
+
+    @Override
+    public String toString() {
+        return account + "|" + instrument + "|" + side;
+    }
 }

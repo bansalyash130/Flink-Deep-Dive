@@ -10,24 +10,29 @@ public class VwapAgg implements AggregateFunction<Trade, double[], String> {
 
     @Override
     public double[] createAccumulator() {
-        return new double[]{0.0, 0.0};      // [0] = Σ(price*qty), [1] = Σ(qty)
+        return new double[]{0,0};
     }
 
     @Override
-    public double[] add(Trade t, double[] acc) {
-        acc[0] += t.price * t.qty;          // fold each trade in as it arrives
-        acc[1] += t.qty;
-        return acc;
+    public double[] add(Trade value, double[] accumulator) {
+
+       accumulator[0] = accumulator[0] + value.price*value.qty;
+       accumulator[1] = accumulator[1] + value.qty;
+       return accumulator;
     }
 
     @Override
-    public String getResult(double[] acc) {
-        double vwap = acc[1] == 0 ? 0 : acc[0] / acc[1];   // VWAP = Σ(px*qty) / Σ(qty)
-        return "vol=" + acc[1] + " vwap=" + String.format("%.2f", vwap);
+    public String getResult(double[] accumulator) {
+        double sumPxQty = accumulator[0];
+        double sumQty   = accumulator[1];
+        double vwap = (sumQty == 0) ? 0 : sumPxQty / sumQty;
+        return "volume=" + sumQty + " vwap=" + String.format("%.2f", vwap);
     }
 
     @Override
     public double[] merge(double[] a, double[] b) {
-        return new double[]{a[0] + b[0], a[1] + b[1]};     // used when windows merge (e.g. session)
+        a[0] += b[0];
+        a[1] += b[1];
+        return a;
     }
 }
