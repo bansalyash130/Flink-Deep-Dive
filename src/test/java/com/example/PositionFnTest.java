@@ -1,5 +1,7 @@
 package com.example;
 
+import com.example.flink.PositionFn;
+import com.example.flink.Trade;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.operators.KeyedProcessOperator;
 import org.apache.flink.streaming.util.KeyedOneInputStreamOperatorTestHarness;

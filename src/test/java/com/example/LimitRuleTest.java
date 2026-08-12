@@ -1,5 +1,6 @@
 package com.example;
 
+import com.example.flink.LimitRule;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

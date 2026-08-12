@@ -1,5 +1,7 @@
 package com.example;
 
+import com.example.flink.AlertFn;
+import com.example.flink.Trade;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.operators.KeyedProcessOperator;
 import org.apache.flink.streaming.util.KeyedOneInputStreamOperatorTestHarness;
@@ -63,6 +65,20 @@ class AlertFnTest {
         
         ConcurrentLinkedQueue<Object> output = harness.getOutput();
         assertTrue(output.size() > 0, "Expected alert when cumulative exposure (600) > limit (500)");
+    }
+
+    @Test
+    void testSustainedBreachKeepsExistingTimer() throws Exception {
+        // First breach arms the timer (over && armed == null).
+        harness.processElement(new Trade("ACC-1", "AAPL", "BUY", 600, 150.0, 1000), 1000);
+        // Second breach while still armed -> no-op, keeps the original timer (over && armed != null).
+        harness.processElement(new Trade("ACC-1", "AAPL", "BUY", 100, 150.0, 1500), 1500);
+        // Original timer fires at 1000 + 1000ms.
+        harness.processWatermark(2001);
+
+        ConcurrentLinkedQueue<Object> output = harness.getOutput();
+        long alerts = output.stream().filter(o -> o.toString().contains("ALERT")).count();
+        assertEquals(1, alerts, "A single sustained breach should fire exactly one alert");
     }
 
     @Test

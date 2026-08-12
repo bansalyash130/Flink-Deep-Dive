@@ -1,4 +1,4 @@
-package com.example;
+package com.example.flink;
 
 public class Trade {
     public String account;

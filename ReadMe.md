@@ -13,6 +13,17 @@ This project explores Apache Flink 2.2.0 streaming capabilities with a practical
 - **Manages state** with RocksDB backend and incremental checkpointing
 - **Recovers from failures** with fixed-delay restart strategy (10 attempts, 3s delay)
 
+It also ships a small **standalone Redis demo** (`RedisDemo`) that sinks running positions into
+Redis hashes, independent of Flink. The `App` entry point selects what to run via a mode argument
+(`both` | `flink` | `redis`, default `both`).
+
+### Code layout
+
+- `com.example.App` — entry point / mode dispatcher
+- `com.example.flink.*` — the Flink streaming job and its functions (`FlinkJob`, `Trade`, `LimitRule`,
+  `LimitBroadcastFn`, `PositionFn`, `VwapAgg`, `CountAgg`, `AlertFn`)
+- `com.example.redis.RedisDemo` — Flink-independent position sink into Redis
+
 ## Architecture
 
 ### Components
@@ -22,7 +33,7 @@ This project explores Apache Flink 2.2.0 streaming capabilities with a practical
 - **Realistic Lag**: Trades timestamped 0–10 seconds in the past (simulates network latency)
 - **Helper**: `signedQty()` converts signed quantities for position tracking
 
-#### 2. **Trade Generator** (`App.makeGenerator()`)
+#### 2. **Trade Generator** (`FlinkJob.makeGenerator()`)
 - Synthetic data source using Flink's `DataGeneratorSource`
 - Generates trades indefinitely at 20 trades/sec
 - Random selection from:
@@ -47,7 +58,8 @@ This project explores Apache Flink 2.2.0 streaming capabilities with a practical
   - Reads current limit from broadcast state
   - Triggers event-time timer if exposure exceeds limit
   - Cancels timer if exposure drops back under limit
-  - Fires alert if breach is sustained for 30 seconds
+  - Fires alert if breach is sustained for the configured window (`sustainedMs`, wired to 1s in `FlinkJob`)
+  - Default limit of 500 applies per account until a rule arrives on the broadcast stream
 - **Outputs**:
   - `LIMIT-UPDATE ACC-1 -> 5000` (limit changed)
   - `ALERT ACC-2 sustained breach, exposure=5500.0` (threshold violated)
@@ -120,7 +132,8 @@ Event Time Watermarking (5s out-of-order, 30s idle)
 
 ### Fault Tolerance
 - **Restart Strategy**: Fixed-delay (10 attempts, 3-second delay)
-- **Checkpoint Directory**: `./checkpoints/`
+- **Checkpoint Directory**: currently hardcoded in `FlinkJob.run()` to an absolute Windows path
+  (`file:///C:/Users/bansa/IdeaProjects/Flink-Deep-Dive/checkpoints`) — change this before running elsewhere
 
 ### Execution
 - **Parallelism**: 2
@@ -133,6 +146,7 @@ Event Time Watermarking (5s out-of-order, 30s idle)
 - Java 17+
 - Maven 3.8+
 - Flink 2.2.0 (embedded via Maven)
+- (Optional) A Redis-compatible server on `localhost:6379` (e.g. Memurai/Redis) for the `redis` mode
 
 ### Build
 ```bash
@@ -140,11 +154,22 @@ mvn clean package
 ```
 
 ### Run
+
+`App` takes an optional mode argument: `both` (default) | `flink` | `redis`.
+
 ```bash
+# Flink job + Redis demo (default)
 java -jar target/flink-deep-dive-1.0-SNAPSHOT.jar
+
+# Flink streaming job only
+java -jar target/flink-deep-dive-1.0-SNAPSHOT.jar flink
+
+# Redis position sink only
+java -jar target/flink-deep-dive-1.0-SNAPSHOT.jar redis
 ```
 
-Or run directly in IDE (Main class: `com.example.App`)
+Or run directly in IDE (Main class: `com.example.App`). The Redis demo logs a connection error and
+exits cleanly if no server is reachable, so `both` still works without Redis installed.
 
 ### Monitor
 - Web Dashboard: http://localhost:8081
@@ -162,7 +187,7 @@ Or run directly in IDE (Main class: `com.example.App`)
 | **Keyed State** | PositionFn & LimitBroadcastFn maintain per-key state (position, exposure, timers) |
 | **Broadcast State** | LimitBroadcastFn reads dynamic limits from broadcast control stream |
 | **State TTL** | AlertFn demonstrates expiring state after 1 hour of inactivity |
-| **Event-Time Timers** | LimitBroadcastFn fires alerts after sustained breach (30s timer) |
+| **Event-Time Timers** | LimitBroadcastFn fires alerts after a sustained breach (configurable timer, 1s in `FlinkJob`) |
 | **Stream Connectivity** | `connect()` + `KeyedBroadcastProcessFunction` joins trades with limit updates |
 | **Stateless Aggregation** | AggregateFunction for VWAP and count computation |
 | **Side Outputs** | Late trades captured in separate stream |
@@ -188,16 +213,22 @@ LIMIT-UPDATE ACC-3 -> 4500
 ```
 Flink-Deep-Dive/
 ├── src/main/java/com/example/
-│   ├── App.java                 # Main streaming job
-│   ├── Trade.java              # Trade data model
-│   ├── LimitRule.java          # Control stream: dynamic exposure limits
-│   ├── LimitBroadcastFn.java   # Broadcast processor: risk monitoring + alerts
-│   ├── PositionFn.java         # Stateful position processor (per account|instrument)
-│   ├── AlertFn.java            # Static limit alert (alternative, simpler version)
-│   ├── VwapAgg.java            # VWAP aggregation function
-│   └── CountAgg.java           # Trade count aggregation function
-├── pom.xml                      # Maven config (Flink 2.2.0, RocksDB, Kafka connector)
-└── ReadMe.md                   # This file
+│   ├── App.java                     # Entry point / mode dispatcher (both | flink | redis)
+│   ├── flink/
+│   │   ├── FlinkJob.java            # The Flink streaming job (pipeline wiring, run())
+│   │   ├── Trade.java              # Trade data model
+│   │   ├── LimitRule.java          # Control stream: dynamic exposure limits
+│   │   ├── LimitBroadcastFn.java   # Broadcast processor: risk monitoring + alerts
+│   │   ├── PositionFn.java         # Stateful position processor (per account|instrument)
+│   │   ├── AlertFn.java            # Static limit alert (standalone, not wired into FlinkJob)
+│   │   ├── VwapAgg.java            # VWAP aggregation function
+│   │   └── CountAgg.java           # Trade count aggregation function
+│   └── redis/
+│       └── RedisDemo.java          # Flink-independent position sink into Redis
+├── src/test/java/com/example/       # JUnit 5 tests (+ Flink harnesses, Mockito) — see TEST_SUMMARY.md
+├── pom.xml                          # Maven config (Flink 2.2.0, RocksDB, Kafka connector, Jedis, Mockito)
+├── TEST_SUMMARY.md                  # Test coverage documentation
+└── ReadMe.md                       # This file
 ```
 
 ## Next Steps / Future Enhancements
@@ -219,7 +250,7 @@ Flink-Deep-Dive/
 - Example: Risk desk updates account limits in real-time
 
 ### Timers for Sustained Alerting
-- Timer fires only if exposure stays over limit for 30 seconds
+- Timer fires only if exposure stays over the limit for the sustained window (1s as wired)
 - Transient breaches don't trigger alerts
 - Cancels timer automatically if exposure normalizes
 - Uses event time for reproducible, deterministic behavior
@@ -238,4 +269,4 @@ Flink-Deep-Dive/
 - Web UI provides visibility into topology, metrics, and checkpoint history
 - Two approaches to alerting:
   - **LimitBroadcastFn**: Dynamic, per-account limits from control stream
-  - **AlertFn**: Static limit (3500 in AlertFn constructor), simpler but less flexible
+  - **AlertFn**: Static limit passed to its constructor, simpler but less flexible (not wired into `FlinkJob`; standalone/tested in isolation)

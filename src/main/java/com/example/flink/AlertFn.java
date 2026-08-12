@@ -1,4 +1,4 @@
-package com.example;
+package com.example.flink;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.StateTtlConfig;
@@ -8,7 +8,6 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 
 import java.time.Duration;
-import java.util.Timer;
 
 public class AlertFn extends KeyedProcessFunction<String,Trade , String> {
 

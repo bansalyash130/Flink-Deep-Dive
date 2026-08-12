@@ -1,4 +1,4 @@
-package com.example;
+package com.example.flink;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.ValueState;

@@ -82,6 +82,7 @@ Tests the `AlertFn` stateful processor (static limit alerting with TTL).
 - `testExposureBelowLimit()` - No alert when below limit
 - `testExposureAboveLimit()` - Alert fires after sustained breach
 - `testAccumulateExposure()` - Cumulative exposure checked against limit
+- `testSustainedBreachKeepsExistingTimer()` - Second breach while armed keeps the original timer (one alert)
 - `testBreachCleared()` - Cancellation message when breach resolves
 - **Limit**: 500 (configured in AlertFn constructor)
 
@@ -93,21 +94,25 @@ Tests the `AlertFn` stateful processor (static limit alerting with TTL).
 Tests the `LimitBroadcastFn` broadcast processor (dynamic limit alerting).
 
 **Key Components**:
-- Uses `KeyedBroadcastOperatorTestHarness`
+- Drives the real operator via `KeyedBroadcastOperatorTestHarness` wrapping a `CoBroadcastWithKeyedOperator`
 - Keying: `account`
 - Keyed State: ValueState for exposure + timer
 - Broadcast State: Map<account, limit>
 - Dual stream: `trades` (keyed) + `limitUpdates` (broadcast)
+- Event-time timers fired by advancing watermarks on **both** inputs (operator time is the min across inputs)
 
 **Tests**:
-- `testBroadcastLimitUpdate()` - Limit rules update broadcast state
+- `testBroadcastLimitUpdate()` - Limit rule emits LIMIT-UPDATE and lands in broadcast state
 - `testTradeWithinLimit()` - No alert when trade within limit
-- `testTradeExceedsLimit()` - Alert fires after sustained breach
-- `testDefaultLimitApplied()` - Default limit (500) when no rule set
-- `testMultipleLimitUpdates()` - Multiple limit updates per account
-- `testNegativeExposure()` - Checks absolute value (short positions)
+- `testSustainedBreachFiresAlert()` - Alert fires after a sustained breach
+- `testDefaultLimitAppliedWhenNoRule()` - Default limit (500) when no rule set
+- `testBreachClearedCancelsTimer()` - Timer cancelled when breach clears before firing
+- `testNegativeExposureBreaches()` - Absolute value breaches on short (negative) positions
+- `testSustainedBreachKeepsExistingTimer()` - Second breach while armed keeps the original timer (one alert)
+- `testMultipleLimitUpdatesLastWins()` - Later limit update overwrites the earlier one
+- `testAccountsAreIndependent()` - Only the breaching account alerts
 
-**Coverage**: Broadcast state, keyed state, dual-stream processing, dynamic limits
+**Coverage**: Broadcast state, keyed state, dual-stream processing, dynamic limits, timer lifecycle (100% instruction & branch)
 
 ---
 
@@ -138,6 +143,9 @@ mvn test -DfailIfNoTests=false    # Don't fail if no tests found
 - **Flink Test Utils** - Test harnesses for operators
   - `KeyedOneInputStreamOperatorTestHarness` - Single keyed stream
   - `KeyedBroadcastOperatorTestHarness` - Keyed + broadcast streams
+- **Mockito** - Mocks Redis IO (`JedisPool`/`Jedis`) and static dispatch (`FlinkJob.run()`)
+  - `mockConstruction` - intercepts `new JedisPool(...)` so no server is contacted
+  - `mockStatic` - stubs `FlinkJob.run()` so `App.main` does not block
 - **Assertions** - JUnit `assertEquals`, `assertTrue`, `assertFalse`
 
 ---
@@ -151,9 +159,11 @@ mvn test -DfailIfNoTests=false    # Don't fail if no tests found
 | VwapAgg | 6 | ✅ Complete (VWAP formula, merge, edge cases) |
 | CountAgg | 5 | ✅ Complete (accumulation, merge) |
 | PositionFn | 4 | ✅ Core logic (state, keying, BUY/SELL) |
-| AlertFn | 5 | ✅ Alerting lifecycle (timer, breach, TTL) |
-| LimitBroadcastFn | 7 | ✅ Broadcast patterns, dynamic limits, timers |
-| App (main job) | — | Integration tests recommended (MiniCluster) |
+| AlertFn | 6 | ✅ 100% (alerting lifecycle, timer, breach, TTL) |
+| LimitBroadcastFn | 9 | ✅ 100% (broadcast patterns, dynamic limits, timers) |
+| RedisDemo | 5 | ✅ ~96% (Jedis IO mocked; write/read-back/interrupt) |
+| FlinkJob | 3 | ⚠️ ~32% — only pure helpers; `run()` blocks in `env.execute()` (needs bounded MiniCluster IT) |
+| App | 3 | ⚠️ ~73% — flink dispatch mocked; redis-thread path needs a live thread (MockedStatic is thread-local) |
 
 ---
 
