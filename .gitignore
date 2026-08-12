@@ -1,0 +1,13 @@
+# Maven build output
+target/
+
+# Flink local state
+checkpoints/
+
+# IDEs
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
