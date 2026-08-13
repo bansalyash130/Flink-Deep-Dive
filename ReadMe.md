@@ -122,6 +122,29 @@ Event Time Watermarking (5s out-of-order, 30s idle)
           Console Output
 ```
 
+## Redis Demo (standalone)
+
+`com.example.redis.RedisDemo` is a small, Flink-independent sink that generates the same synthetic
+trades and writes several running views into Redis (via Jedis). It runs in the `redis` (or default
+`both`) mode, connects to `localhost:6379`, and logs a connection error and exits cleanly if no
+server is reachable.
+
+Keys written per trade:
+
+| Key | Type | Contents |
+|-----|------|----------|
+| `pos:<account>\|<instrument>` | Hash | Running position: `qty`, `notional` (both `HINCRBYFLOAT`), `updated` (event time) |
+| `risk:exposure` | Sorted Set | Per-account exposure leaderboard: `ZINCRBY` by `\|signedQty x price\|` |
+| `stat:<instrument>:<minute>` | Hash | Per-instrument, per-minute rolling stats: `volume`, `notional`, `count`; 1h TTL via `EXPIRE 3600` |
+
+Every 5,000 trades it reads a few views back and prints them:
+- `pos:ACC-1|AAPL` current position (`HGETALL`)
+- Top-5 risk leaderboard (`ZREVRANGE ... WITHSCORES`)
+- Current-minute AAPL stats with VWAP (`notional / volume`) and remaining TTL
+
+All Redis IO is unit-tested with a mocked `JedisPool`/`Jedis` (no live server needed) — see
+[TEST_SUMMARY.md](TEST_SUMMARY.md).
+
 ## Configuration
 
 ### State Management

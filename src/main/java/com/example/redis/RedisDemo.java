@@ -3,6 +3,9 @@ package com.example.redis;
 import com.example.flink.Trade;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.resps.Tuple;
+
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -30,17 +33,49 @@ public class RedisDemo {
             String key = "pos:" + t.account + "|" + t.instrument;
 
             try (Jedis j = pool.getResource()) {
-                // atomic += on hash fields (no client-side read-modify-write race)
+                //hash
                 j.hincrByFloat(key, "qty", t.signedQty());
                 j.hincrByFloat(key, "notional", t.signedQty() * t.price);
                 j.hset(key, "updated", Long.toString(t.eventTime));
+
+                //leaderboard
+                double tradeExposure = Math.abs(t.signedQty()*t.price);
+                j.zincrby("risk:exposure", tradeExposure, t.account);
+
+                //per instrument rolling stats
+                long minute = t.eventTime / 60000;
+                String statKey = "stat:" + t.instrument + ":" + minute;
+                double absQty = Math.abs(t.signedQty());
+                j.hincrByFloat(statKey, "volume",   absQty);
+                j.hincrByFloat(statKey, "notional", absQty * t.price);
+                j.hincrBy(statKey, "count", 1);
+                j.expire(statKey, 3600);
             }
 
-            // every so often, read one back so you can see it working
             if (i % 5_000 == 0) {
                 try (Jedis j = pool.getResource()) {
                     Map<String, String> p = j.hgetAll("pos:ACC-1|AAPL");
                     System.out.println("[redis] pos:ACC-1|AAPL -> " + p);
+
+                    // top risks
+                    System.out.println("[redis] --- top risk ---");
+                    List<Tuple> top = j.zrevrangeWithScores("risk:exposure", 0,4);
+                    for (Tuple t2 : top) {
+                        System.out.printf("  %-6s exposure=%.2f%n", t2.getElement(), t2.getScore());
+                    }
+
+                    //stats data
+                    long m = System.currentTimeMillis() / 60_000;
+                    String sk = "stat:AAPL:" + m;
+                    Map<String, String> s = j.hgetAll(sk);
+                    if (!s.isEmpty()) {
+                        double vol = Double.parseDouble(s.getOrDefault("volume", "0"));
+                        double not = Double.parseDouble(s.getOrDefault("notional", "0"));
+                        double vwap = vol == 0 ? 0 : not / vol;
+                        long ttl = j.ttl(sk);
+                        System.out.printf("[redis] AAPL this minute: vol=%.0f vwap=%.2f count=%s ttl=%ds%n",
+                            vol, vwap, s.getOrDefault("count", "0"), ttl);
+                    }
                 }
             }
 

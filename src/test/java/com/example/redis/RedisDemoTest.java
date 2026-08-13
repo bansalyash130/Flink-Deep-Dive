@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.resps.Tuple;
 
 import java.util.Arrays;
 import java.util.List;
@@ -82,6 +83,54 @@ class RedisDemoTest {
         // Loop breaks after the first iteration's write, before completing all 5.
         verify(jedis, times(1)).hincrByFloat(anyString(), eq("qty"), anyDouble());
         assertTrue(Thread.interrupted(), "interrupt flag should be restored (and is now cleared)");
+    }
+
+    @Test
+    void testRunUpdatesRiskLeaderboard() {
+        JedisPool pool = mock(JedisPool.class);
+        Jedis jedis = mock(Jedis.class);
+        when(pool.getResource()).thenReturn(jedis);
+        when(jedis.hgetAll(anyString())).thenReturn(Map.of());
+
+        RedisDemo.run(pool, 1);
+
+        // Each trade adds |signedQty * price| to the account's score in the exposure sorted set.
+        verify(jedis).zincrby(eq("risk:exposure"), doubleThat(v -> v >= 0.0), startsWith("ACC-"));
+    }
+
+    @Test
+    void testRunUpdatesPerInstrumentStats() {
+        JedisPool pool = mock(JedisPool.class);
+        Jedis jedis = mock(Jedis.class);
+        when(pool.getResource()).thenReturn(jedis);
+        when(jedis.hgetAll(anyString())).thenReturn(Map.of());
+
+        RedisDemo.run(pool, 1);
+
+        // Per-instrument, per-minute rolling stats hash: volume, notional, count, with a 1h TTL.
+        verify(jedis).hincrByFloat(startsWith("stat:"), eq("volume"), anyDouble());
+        verify(jedis).hincrByFloat(startsWith("stat:"), eq("notional"), anyDouble());
+        verify(jedis).hincrBy(startsWith("stat:"), eq("count"), eq(1L));
+        verify(jedis).expire(startsWith("stat:"), eq(3600L));
+    }
+
+    @Test
+    void testReadBackQueriesLeaderboardAndStats() {
+        JedisPool pool = mock(JedisPool.class);
+        Jedis jedis = mock(Jedis.class);
+        when(pool.getResource()).thenReturn(jedis);
+        when(jedis.hgetAll(anyString())).thenReturn(Map.of());
+        // Non-empty current-minute AAPL stats so the VWAP/TTL branch runs.
+        when(jedis.hgetAll(startsWith("stat:AAPL:")))
+            .thenReturn(Map.of("volume", "10", "notional", "2000", "count", "3"));
+        when(jedis.ttl(startsWith("stat:AAPL:"))).thenReturn(3600L);
+        when(jedis.zrevrangeWithScores(eq("risk:exposure"), anyLong(), anyLong()))
+            .thenReturn(List.of(new Tuple("ACC-1", 1200.0), new Tuple("ACC-2", 800.0)));
+
+        RedisDemo.run(pool, 1); // i=0 triggers the read-back block
+
+        verify(jedis).zrevrangeWithScores("risk:exposure", 0, 4);
+        verify(jedis).ttl(startsWith("stat:AAPL:")); // reached only when stats are non-empty
     }
 
     @Test

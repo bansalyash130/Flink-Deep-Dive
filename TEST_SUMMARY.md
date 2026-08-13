@@ -117,6 +117,27 @@ Tests the `LimitBroadcastFn` broadcast processor (dynamic limit alerting).
 
 ---
 
+### 8. **RedisDemoTest.java**
+Tests the `RedisDemo` standalone Redis sink. All Redis IO is mocked with **Mockito** (no live server).
+
+**Key Components**:
+- Mocks `JedisPool`/`Jedis`; drives the extracted `run(pool, iterations)` seam with a small count
+- `mockConstruction` intercepts `new JedisPool(...)` for the no-arg `run()` failure path
+
+**Tests**:
+- `testRandomTradeProducesValidFields()` - Random trade fields are within valid ranges
+- `testRunWritesPositionAndReadsBack()` - Position hash (`qty`/`notional`/`updated`) written, `pos:ACC-1|AAPL` read back
+- `testReadBackOnlyOnEvery5000th()` - Read-back happens only on the periodic tick
+- `testRunStopsOnInterrupt()` - Loop breaks and restores the interrupt flag
+- `testRunUpdatesRiskLeaderboard()` - `ZINCRBY risk:exposure` by `|signedQty x price|` per account
+- `testRunUpdatesPerInstrumentStats()` - `stat:<instr>:<minute>` volume/notional/count + `EXPIRE 3600`
+- `testReadBackQueriesLeaderboardAndStats()` - Top-5 leaderboard + current-minute VWAP/TTL read-back
+- `testNoArgRunHandlesConnectionFailure()` - Connection failure is caught and logged, not propagated
+
+**Coverage**: Position/leaderboard/stats writes, periodic read-back, interrupt handling, failure path (~96%)
+
+---
+
 ## Running the Tests
 
 ### Option 1: Maven Command Line
@@ -162,7 +183,7 @@ mvn test -DfailIfNoTests=false    # Don't fail if no tests found
 | PositionFn | 4 | ✅ Core logic (state, keying, BUY/SELL) |
 | AlertFn | 6 | ✅ 100% (alerting lifecycle, timer, breach, TTL) |
 | LimitBroadcastFn | 10 | ✅ 100% (broadcast patterns, dynamic limits, timers, watermark regression) |
-| RedisDemo | 5 | ✅ ~96% (Jedis IO mocked; write/read-back/interrupt) |
+| RedisDemo | 8 | ✅ ~96% (Jedis IO mocked; positions, risk leaderboard, per-instrument stats, read-back, interrupt) |
 | FlinkJob | 3 | ⚠️ ~32% — only pure helpers; `run()` blocks in `env.execute()` (needs bounded MiniCluster IT) |
 | App | 3 | ⚠️ ~73% — flink dispatch mocked; redis-thread path needs a live thread (MockedStatic is thread-local) |
 
