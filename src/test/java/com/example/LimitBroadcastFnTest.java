@@ -104,6 +104,21 @@ class LimitBroadcastFnTest {
     }
 
     @Test
+    void testNoAlertWhenBroadcastWatermarkPinned() throws Exception {
+        // Regression guard for the production bug: a broadcast source with noWatermarks() keeps the
+        // broadcast input's watermark at -inf. The connected operator's event time is min(inputs),
+        // so advancing ONLY the keyed (trade) input cannot move the operator clock, and the
+        // event-time timer that emits the alert never fires.
+        harness.processBroadcastElement(new LimitRule("ACC-1", 500.0), 1000);
+        harness.processElement(new Trade("ACC-1", "AAPL", "BUY", 600, 150.0, 1000), 1000);
+
+        harness.processWatermark(1000 + SUSTAINED_MS + 1); // trade side only; broadcast side left at -inf
+
+        assertFalse(outputText().contains("ALERT"),
+            "With the broadcast watermark pinned at -inf the operator clock cannot advance, so no alert fires");
+    }
+
+    @Test
     void testDefaultLimitAppliedWhenNoRule() throws Exception {
         // No broadcast rule -> default limit of 500 applies. 700 > 500 -> alert.
         harness.processElement(new Trade("ACC-2", "MSFT", "BUY", 700, 150.0, 1000), 1000);

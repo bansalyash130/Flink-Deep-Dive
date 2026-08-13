@@ -104,7 +104,8 @@ Tests the `LimitBroadcastFn` broadcast processor (dynamic limit alerting).
 **Tests**:
 - `testBroadcastLimitUpdate()` - Limit rule emits LIMIT-UPDATE and lands in broadcast state
 - `testTradeWithinLimit()` - No alert when trade within limit
-- `testSustainedBreachFiresAlert()` - Alert fires after a sustained breach
+- `testSustainedBreachFiresAlert()` - Alert fires after a sustained breach (both input watermarks advanced)
+- `testNoAlertWhenBroadcastWatermarkPinned()` - Regression: no alert when only the trade-side watermark advances (broadcast side pinned at -inf, the `noWatermarks()` bug)
 - `testDefaultLimitAppliedWhenNoRule()` - Default limit (500) when no rule set
 - `testBreachClearedCancelsTimer()` - Timer cancelled when breach clears before firing
 - `testNegativeExposureBreaches()` - Absolute value breaches on short (negative) positions
@@ -160,7 +161,7 @@ mvn test -DfailIfNoTests=false    # Don't fail if no tests found
 | CountAgg | 5 | ✅ Complete (accumulation, merge) |
 | PositionFn | 4 | ✅ Core logic (state, keying, BUY/SELL) |
 | AlertFn | 6 | ✅ 100% (alerting lifecycle, timer, breach, TTL) |
-| LimitBroadcastFn | 9 | ✅ 100% (broadcast patterns, dynamic limits, timers) |
+| LimitBroadcastFn | 10 | ✅ 100% (broadcast patterns, dynamic limits, timers, watermark regression) |
 | RedisDemo | 5 | ✅ ~96% (Jedis IO mocked; write/read-back/interrupt) |
 | FlinkJob | 3 | ⚠️ ~32% — only pure helpers; `run()` blocks in `env.execute()` (needs bounded MiniCluster IT) |
 | App | 3 | ⚠️ ~73% — flink dispatch mocked; redis-thread path needs a live thread (MockedStatic is thread-local) |

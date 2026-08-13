@@ -192,7 +192,7 @@ exits cleanly if no server is reachable, so `both` still works without Redis ins
 | **Stateless Aggregation** | AggregateFunction for VWAP and count computation |
 | **Side Outputs** | Late trades captured in separate stream |
 | **Checkpointing** | RocksDB backend, incremental snapshots, 5s interval |
-| **Watermarks** | Out-of-order tolerance (5s), idleness detection (30s) |
+| **Watermarks** | Trades: 5s out-of-order tolerance + 30s idleness. Broadcast limit stream is marked idle so it does not pin the connected operator's event time (see [Watermarks in the connected operator](#watermarks-in-the-connected-operator)) |
 
 ## Output Examples
 
@@ -254,6 +254,17 @@ Flink-Deep-Dive/
 - Transient breaches don't trigger alerts
 - Cancels timer automatically if exposure normalizes
 - Uses event time for reproducible, deterministic behavior
+
+### Watermarks in the connected operator
+- The alert operator connects the keyed trade stream with the broadcast limit stream. A connected
+  operator's event time is the **minimum** of its inputs' watermarks.
+- Alerts are emitted from an **event-time timer** (`onTimer`), so the operator's event time must
+  advance for any alert to fire.
+- If the broadcast limit stream produces no watermarks (`WatermarkStrategy.noWatermarks()`), its
+  watermark stays at `-inf` and pins the operator at `-inf` — the timer never fires and **no alerts
+  are ever produced** (though `LIMIT-UPDATE` lines, emitted synchronously, still appear).
+- Fix: the limit stream uses `forMonotonousTimestamps().withIdleness(1s)` so it is marked idle and
+  excluded from the watermark minimum, letting the trade stream drive event time forward.
 
 ### State TTL (Optional)
 - `AlertFn` demonstrates state expiration after 1 hour

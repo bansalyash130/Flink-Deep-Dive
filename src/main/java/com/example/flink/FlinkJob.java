@@ -73,7 +73,9 @@ public class FlinkJob {
         env.setParallelism(2);
 
         DataStream<LimitRule> limitUpdates = env.fromSource(
-            limitUpdates(), WatermarkStrategy.noWatermarks(), "limit-updates");
+            limitUpdates(),
+            WatermarkStrategy.<LimitRule>forMonotonousTimestamps()
+                .withIdleness(Duration.ofSeconds(1)), "limit-updates");
 
         DataStream<Trade> trades = env.fromSource(
             makeGenerator(),
@@ -94,24 +96,24 @@ public class FlinkJob {
             .process(new LimitBroadcastFn(limitsDesc, 1000))
             .uid("limit-broadcast-fn");
         alerts.print();
+//
+//        DataStream<String> positions = trades
+//            .keyBy(t -> t.account + "|" + t.instrument)
+//            .process(new PositionFn())
+//            .uid("position-fn");
 
-        DataStream<String> positions = trades
-            .keyBy(t -> t.account + "|" + t.instrument)
-            .process(new PositionFn())
-            .uid("position-fn");
-
-        DataStream<String> vwap = trades
-            .keyBy(t -> t.account + "|" + t.instrument)
-            .window(TumblingEventTimeWindows.of(Duration.ofSeconds(5)))
-            .aggregate(new VwapAgg())
-            .uid("vwap-agg");
-
-        SingleOutputStreamOperator<Long> windowedTrades = trades
-            .keyBy(t -> t.account + "|" + t.instrument)
-            .window(TumblingEventTimeWindows.of(Duration.ofSeconds(5)))
-            .allowedLateness(Duration.ofSeconds(2))
-            .sideOutputLateData(sideOutput)
-            .aggregate(new CountAgg());
+//        DataStream<String> vwap = trades
+//            .keyBy(t -> t.account + "|" + t.instrument)
+//            .window(TumblingEventTimeWindows.of(Duration.ofSeconds(5)))
+//            .aggregate(new VwapAgg())
+//            .uid("vwap-agg");
+//
+//        SingleOutputStreamOperator<Long> windowedTrades = trades
+//            .keyBy(t -> t.account + "|" + t.instrument)
+//            .window(TumblingEventTimeWindows.of(Duration.ofSeconds(5)))
+//            .allowedLateness(Duration.ofSeconds(2))
+//            .sideOutputLateData(sideOutput)
+//            .aggregate(new CountAgg());
 
         env.execute();
     }
